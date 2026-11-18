@@ -1,0 +1,56 @@
+name: Build PDF Editor Chrome Extension
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'chrome-pdf-text-editor.zip'
+      - '.github/workflows/build-extension.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out extension source
+        uses: actions/checkout@v4
+
+      - name: Unpack extension source
+        shell: bash
+        run: |
+          test -f chrome-pdf-text-editor.zip || { echo "::error::Upload chrome-pdf-text-editor.zip to the repository root first."; exit 1; }
+          mkdir -p staging
+          unzip -q chrome-pdf-text-editor.zip -d staging
+          test -f staging/pdf-editor-extension/manifest.json
+          test -f staging/pdf-editor-extension/setup-dependencies.ps1
+
+      - name: Run dependency setup online (PowerShell)
+        shell: pwsh
+        run: ./staging/pdf-editor-extension/setup-dependencies.ps1
+
+      - name: Validate extension assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          dir=staging/pdf-editor-extension
+          for asset in manifest.json editor.html editor.js background.js style.css vendor/pdf.min.js vendor/pdf.worker.min.js vendor/pdf-lib.min.js; do
+            test -s "$dir/$asset" || { echo "::error::Missing or empty $asset"; exit 1; }
+          done
+          python3 -m json.tool "$dir/manifest.json" >/dev/null
+          node --check "$dir/editor.js"
+          node --check "$dir/background.js"
+
+      - name: Package ready-to-install extension
+        shell: bash
+        run: |
+          cd staging
+          zip -qr ../chrome-pdf-editor-ready.zip pdf-editor-extension -x '*/setup-dependencies.ps1' '*/setup-dependencies.sh' '*/vendor/INSTALL_LIBRARIES.txt'
+
+      - name: Upload ready-to-install ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-pdf-editor-ready
+          path: chrome-pdf-editor-ready.zip
+          retention-days: 30
